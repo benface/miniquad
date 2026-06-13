@@ -507,13 +507,19 @@ impl RenderingBackend for MetalContext {
         unimplemented!()
     }
     fn texture_generate_mipmaps(&mut self, texture: TextureId) {
+        let texture = self.textures.get(texture);
+        // Trait contract: no-op when the texture wasn't allocated
+        // with mipmaps. The Metal call below otherwise asserts on
+        // `mipmapLevelCount > 1`.
+        if !texture.params.allocate_mipmaps {
+            return;
+        }
         unsafe {
             if self.command_buffer.is_none() {
                 self.command_buffer = Some(msg_send![self.command_queue, commandBuffer]);
             }
             let command_buffer = self.command_buffer.unwrap();
             let encoder = msg_send_![command_buffer, blitCommandEncoder];
-            let texture = self.textures.get(texture);
             msg_send_![encoder, generateMipmapsForTexture: texture.texture];
             msg_send_![encoder, endEncoding];
         }
