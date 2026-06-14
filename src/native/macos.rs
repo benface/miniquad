@@ -214,8 +214,16 @@ impl MacosDisplay {
             }
         }
         if d.high_dpi {
+            // `window.backingScaleFactor` returns 0.0 when the window
+            // is not yet attached to a screen — which is exactly the
+            // state during the startup `update_dimensions()` call,
+            // before `makeKeyAndOrderFront`. Skip the assignment in
+            // that case so `dpi_scale` stays at its (correct) previous
+            // value until a later call catches a valid scale.
             let dpi_scale: f64 = msg_send![self.window, backingScaleFactor];
-            d.dpi_scale = dpi_scale as f32;
+            if dpi_scale > 0.0 {
+                d.dpi_scale = dpi_scale as f32;
+            }
         } else {
             let bounds: NSRect = msg_send![self.view, bounds];
             let backing_size: NSSize = msg_send![self.view, convertSizeToBacking: NSSize {width: bounds.size.width, height: bounds.size.height}];
@@ -954,6 +962,19 @@ pub fn define_metal_view_class() -> *const Class {
     extern "C" fn draw_rect(this: &Object, _sel: Sel, _: ObjcId) {
         let payload = get_window_payload(this);
         unsafe {
+            // Refresh `dpi_scale` + dimensions every frame, matching
+            // the OpenGL path. The startup `update_dimensions()` call
+            // runs before the window is on a screen, so it sees a
+            // zero `backingScaleFactor` (now guarded against — see
+            // `update_dimensions`) and leaves `dpi_scale` at its 1.0
+            // default. Without this per-frame refresh, the Metal
+            // backend would stay at point-resolution coordinates even
+            // on Retina displays.
+            if let Some((w, h)) = payload.update_dimensions() {
+                if let Some(event_handler) = payload.context() {
+                    event_handler.resize_event(w as _, h as _);
+                }
+            }
             let current_runloop = msg_send_![class!(NSRunLoop), currentRunLoop];
             let current_mode: ObjcId = msg_send![current_runloop, currentMode];
             // Not checking name, assuming that this is NSEventTrackingRunLoopMode
