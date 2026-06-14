@@ -237,6 +237,15 @@ impl MacosDisplay {
         }
 
         let bounds: NSRect = msg_send![self.view, bounds];
+        let frame: NSRect = msg_send![self.view, frame];
+        let window_frame: NSRect = msg_send![self.window, frame];
+        eprintln!(
+            "MINIQUAD_DIAG view.bounds={}x{}, view.frame={}x{}, window.frame={}x{}, dpi_scale={}",
+            bounds.size.width, bounds.size.height,
+            frame.size.width, frame.size.height,
+            window_frame.size.width, window_frame.size.height,
+            d.dpi_scale
+        );
         let screen_width = (bounds.size.width as f32 * d.dpi_scale) as i32;
         let screen_height = (bounds.size.height as f32 * d.dpi_scale) as i32;
 
