@@ -221,10 +221,15 @@ impl MacosDisplay {
             // that case so `dpi_scale` stays at its (correct) previous
             // value until a later call catches a valid scale.
             let dpi_scale: f64 = msg_send![self.window, backingScaleFactor];
+            eprintln!(
+                "MINIQUAD_DIAG update_dimensions: high_dpi=true, raw_backing={}, stored_dpi_scale={}",
+                dpi_scale, d.dpi_scale
+            );
             if dpi_scale > 0.0 {
                 d.dpi_scale = dpi_scale as f32;
             }
         } else {
+            eprintln!("MINIQUAD_DIAG update_dimensions: high_dpi=false");
             let bounds: NSRect = msg_send![self.view, bounds];
             let backing_size: NSSize = msg_send![self.view, convertSizeToBacking: NSSize {width: bounds.size.width, height: bounds.size.height}];
 
