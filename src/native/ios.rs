@@ -357,20 +357,30 @@ pub fn define_glk_or_mtk_view_dlg(superclass: &Class) -> *const Class {
         // screen's. On real iPhone / iPad the view fills the screen
         // and the two are equal; on iOS-on-Mac the view can be a
         // window smaller than the Mac display, and apps want the
-        // view (= their actual rendering surface).
+        // view (= their actual rendering surface). Also keep
+        // `dpi_scale` synced with the view's contentScaleFactor so
+        // higher-level APIs (e.g. macroquad's `screen_width()` which
+        // divides by `dpi_scale`) see consistent points-vs-pixels
+        // behaviour across iOS and macOS.
         let view_bounds: NSRect = unsafe { msg_send![payload.view, bounds] };
         let content_scale_factor: f64 =
             unsafe { msg_send![payload.view, contentScaleFactor] };
         let screen_width = (view_bounds.size.width * content_scale_factor) as i32;
         let screen_height = (view_bounds.size.height * content_scale_factor) as i32;
+        let dpi_scale = content_scale_factor as f32;
 
-        if native_display().lock().unwrap().screen_width != screen_width
-            || native_display().lock().unwrap().screen_height != screen_height
-        {
+        let needs_update = {
+            let d = native_display().lock().unwrap();
+            d.screen_width != screen_width
+                || d.screen_height != screen_height
+                || d.dpi_scale != dpi_scale
+        };
+        if needs_update {
             {
                 let mut d = native_display().lock().unwrap();
                 d.screen_width = screen_width;
                 d.screen_height = screen_height;
+                d.dpi_scale = dpi_scale;
             }
             send_message(Message::Resize {
                 width: screen_width,

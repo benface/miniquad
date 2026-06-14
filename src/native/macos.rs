@@ -221,15 +221,10 @@ impl MacosDisplay {
             // that case so `dpi_scale` stays at its (correct) previous
             // value until a later call catches a valid scale.
             let dpi_scale: f64 = msg_send![self.window, backingScaleFactor];
-            eprintln!(
-                "MINIQUAD_DIAG update_dimensions: high_dpi=true, raw_backing={}, stored_dpi_scale={}",
-                dpi_scale, d.dpi_scale
-            );
             if dpi_scale > 0.0 {
                 d.dpi_scale = dpi_scale as f32;
             }
         } else {
-            eprintln!("MINIQUAD_DIAG update_dimensions: high_dpi=false");
             let bounds: NSRect = msg_send![self.view, bounds];
             let backing_size: NSSize = msg_send![self.view, convertSizeToBacking: NSSize {width: bounds.size.width, height: bounds.size.height}];
 
@@ -237,15 +232,6 @@ impl MacosDisplay {
         }
 
         let bounds: NSRect = msg_send![self.view, bounds];
-        let frame: NSRect = msg_send![self.view, frame];
-        let window_frame: NSRect = msg_send![self.window, frame];
-        eprintln!(
-            "MINIQUAD_DIAG view.bounds={}x{}, view.frame={}x{}, window.frame={}x{}, dpi_scale={}",
-            bounds.size.width, bounds.size.height,
-            frame.size.width, frame.size.height,
-            window_frame.size.width, window_frame.size.height,
-            d.dpi_scale
-        );
         let screen_width = (bounds.size.width as f32 * d.dpi_scale) as i32;
         let screen_height = (bounds.size.height as f32 * d.dpi_scale) as i32;
 
