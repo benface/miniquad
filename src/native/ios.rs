@@ -235,18 +235,18 @@ pub fn define_glk_or_mtk_view(superclass: &Class) -> *const Class {
                 // Use the UITouch pointer as a stable ID instead of loop index
                 let touch_id = ios_touch as u64;
                 let ios_pos: NSPoint = msg_send![ios_touch, locationInView: this];
+                let content_scale_factor: f64 = msg_send![this, contentScaleFactor];
 
-                // Touch position is in points (view coordinate
-                // system) — matches `screen_width()` / `screen_height()`
-                // which divide by `dpi_scale` and so also report
-                // points. Don't multiply by scale here: keep both in
-                // the same coordinate system so apps can hit-test
-                // touches against drawn UI without unit conversion.
+                // `locationInView:` returns points; multiply by
+                // `contentScaleFactor` so the dispatched message
+                // carries pixels. Apps reading via
+                // `mouse_position()` get points back because
+                // macroquad divides by `dpi_scale`.
                 send_message(Message::Touch {
                     phase,
                     touch_id,
-                    x: ios_pos.x as f32,
-                    y: ios_pos.y as f32,
+                    x: (ios_pos.x * content_scale_factor) as f32,
+                    y: (ios_pos.y * content_scale_factor) as f32,
                 });
             }
         }

@@ -692,18 +692,11 @@ extern "C" fn Java_quad_1native_QuadNative_surfaceOnTouch(
         x => panic!("Unsupported touch phase: {}", x),
     };
 
-    // Convert pixel-space (`MotionEvent.x` / `y` from the Java side)
-    // to density-independent units to match `screen_width()` /
-    // `screen_height()` (which divide by `dpi_scale` and so report
-    // dp). Apps can then hit-test touches against drawn UI without
-    // unit conversion.
-    let dpi_scale = crate::native_display().lock().unwrap().dpi_scale;
-    let scale = if dpi_scale > 0.0 { dpi_scale } else { 1.0 };
     send_message(Message::Touch {
         phase,
         touch_id: touch_id as _,
-        x: x as f32 / scale,
-        y: y as f32 / scale,
+        x: x as f32,
+        y: y as f32,
     });
 }
 
