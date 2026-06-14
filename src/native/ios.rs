@@ -353,24 +353,16 @@ pub fn define_glk_or_mtk_view_dlg(superclass: &Class) -> *const Class {
             return;
         }
 
-        let main_screen: ObjcId = unsafe { msg_send![class!(UIScreen), mainScreen] };
-        let screen_rect: NSRect = unsafe { msg_send![main_screen, bounds] };
-        let high_dpi = native_display().lock().unwrap().high_dpi;
-
-        let (screen_width, screen_height) = if high_dpi {
-            let scale: f64 = unsafe { msg_send![main_screen, scale] };
-
-            (
-                (screen_rect.size.width * scale) as i32,
-                (screen_rect.size.height * scale) as i32,
-            )
-        } else {
-            let content_scale_factor: f64 = unsafe { msg_send![payload.view, contentScaleFactor] };
-            (
-                (screen_rect.size.width * content_scale_factor) as i32,
-                (screen_rect.size.height * content_scale_factor) as i32,
-            )
-        };
+        // Report the rendered view's pixel size, not the device
+        // screen's. On real iPhone / iPad the view fills the screen
+        // and the two are equal; on iOS-on-Mac the view can be a
+        // window smaller than the Mac display, and apps want the
+        // view (= their actual rendering surface).
+        let view_bounds: NSRect = unsafe { msg_send![payload.view, bounds] };
+        let content_scale_factor: f64 =
+            unsafe { msg_send![payload.view, contentScaleFactor] };
+        let screen_width = (view_bounds.size.width * content_scale_factor) as i32;
+        let screen_height = (view_bounds.size.height * content_scale_factor) as i32;
 
         if native_display().lock().unwrap().screen_width != screen_width
             || native_display().lock().unwrap().screen_height != screen_height
