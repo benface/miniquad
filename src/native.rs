@@ -105,13 +105,13 @@ pub use android::*;
 #[cfg(target_arch = "wasm32")]
 pub mod wasm;
 
-#[cfg(any(target_os = "macos", target_os = "ios"))]
+#[cfg(any(target_os = "macos", target_os = "ios", target_os = "tvos"))]
 pub mod apple;
 
 #[cfg(target_os = "macos")]
 pub mod macos;
 
-#[cfg(target_os = "ios")]
+#[cfg(any(target_os = "ios", target_os = "tvos"))]
 pub mod ios;
 
 #[cfg(any(target_os = "android", target_os = "linux"))]

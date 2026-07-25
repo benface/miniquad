@@ -510,7 +510,7 @@ where
         native::macos::run(conf, f);
     }
 
-    #[cfg(target_os = "ios")]
+    #[cfg(any(target_os = "ios", target_os = "tvos"))]
     unsafe {
         native::ios::run(conf, f);
     }
