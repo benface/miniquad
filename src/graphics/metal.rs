@@ -378,6 +378,10 @@ pub struct MetalContext {
     // cached pipeline from apply_pipeline
     current_pipeline: Option<Pipeline>,
     current_ub_offset: u64,
+    // Objects deleted or replaced during the frame, released once its
+    // command buffer has run: draws queued earlier in the frame may
+    // still be encoded with them.
+    pending_releases: Vec<ObjcId>,
 }
 
 impl Default for MetalContext {
@@ -477,6 +481,7 @@ impl MetalContext {
                 uniform_buffers,
                 current_frame_index: 1,
                 current_ub_offset: 0,
+                pending_releases: vec![],
             }
         }
     }
@@ -519,9 +524,11 @@ impl RenderingBackend for MetalContext {
     }
     fn delete_texture(&mut self, texture: TextureId) {
         let texture = self.textures.get(texture);
-        unsafe {
-            msg_send_![texture.texture, release];
-        }
+        self.pending_releases.extend([
+            texture.texture,
+            texture.sampler,
+            texture.sampler_descriptor,
+        ]);
     }
     fn apply_viewport(&mut self, _x: i32, _y: i32, _w: i32, _h: i32) {}
     fn apply_scissor_rect(&mut self, x: i32, y: i32, w: i32, h: i32) {
@@ -568,15 +575,18 @@ impl RenderingBackend for MetalContext {
             MipmapFilterMode::Linear => MTLSamplerMipFilter::Linear,
         };
 
-        texture.sampler = unsafe {
+        unsafe {
             let sampler_descriptor = msg_send_![class!(MTLSamplerDescriptor), new];
             msg_send_![sampler_descriptor, setMinFilter: filter];
             msg_send_![sampler_descriptor, setMipFilter: mipmap_filter];
-            msg_send_![
+            let sampler = msg_send_![
                 self.device,
                 newSamplerStateWithDescriptor: sampler_descriptor
-            ]
-        };
+            ];
+            msg_send_![sampler_descriptor, release];
+            self.pending_releases.push(texture.sampler);
+            texture.sampler = sampler;
+        }
     }
     fn texture_set_mag_filter(&mut self, texture: TextureId, filter: FilterMode) {
         let texture = self.textures.get_mut(texture);
@@ -586,10 +596,13 @@ impl RenderingBackend for MetalContext {
             FilterMode::Linear => MTLSamplerMinMagFilter::Linear,
         };
 
-        texture.sampler = unsafe {
+        unsafe {
             msg_send_![texture.sampler_descriptor, setMagFilter: filter];
-            msg_send_![self.device, newSamplerStateWithDescriptor: texture.sampler_descriptor]
-        };
+            let sampler =
+                msg_send_![self.device, newSamplerStateWithDescriptor: texture.sampler_descriptor];
+            self.pending_releases.push(texture.sampler);
+            texture.sampler = sampler;
+        }
     }
     fn texture_set_wrap(&mut self, texture: TextureId, wrap_x: TextureWrap, wrap_y: TextureWrap) {
         let texture = self.textures.get_mut(texture);
@@ -606,12 +619,15 @@ impl RenderingBackend for MetalContext {
             TextureWrap::Clamp => MTLSamplerAddressMode::ClampToEdge,
         };
 
-        texture.sampler = unsafe {
+        unsafe {
             //msg_send_![texture.sampler_descriptor, setRAddressMode: wrap];
             msg_send_![texture.sampler_descriptor, setSAddressMode: wrap_s];
             msg_send_![texture.sampler_descriptor, setTAddressMode: wrap_t];
-            msg_send_![self.device, newSamplerStateWithDescriptor: texture.sampler_descriptor]
-        };
+            let sampler =
+                msg_send_![self.device, newSamplerStateWithDescriptor: texture.sampler_descriptor];
+            self.pending_releases.push(texture.sampler);
+            texture.sampler = sampler;
+        }
     }
     fn texture_resize(
         &mut self,
@@ -1010,7 +1026,6 @@ impl RenderingBackend for MetalContext {
 
         let texture = unsafe {
             let sampler_descriptor = msg_send_![class!(MTLSamplerDescriptor), new];
-            msg_send_![sampler_descriptor, retain];
             let min_filter = match params.min_filter {
                 FilterMode::Nearest => MTLSamplerMinMagFilter::Nearest,
                 FilterMode::Linear => MTLSamplerMinMagFilter::Linear,
@@ -1035,7 +1050,6 @@ impl RenderingBackend for MetalContext {
                 newSamplerStateWithDescriptor: sampler_descriptor
             ];
             let raw_texture = msg_send_![self.device, newTextureWithDescriptor: descriptor];
-            msg_send_![raw_texture, retain];
             self.textures.0.push(Texture {
                 sampler: sampler_state,
                 texture: raw_texture,
@@ -1565,6 +1579,9 @@ impl RenderingBackend for MetalContext {
             msg_send_![self.command_buffer.unwrap(), presentDrawable: drawable];
             msg_send_![self.command_buffer.unwrap(), commit];
             msg_send_![self.command_buffer.unwrap(), waitUntilCompleted];
+            for object in self.pending_releases.drain(..) {
+                msg_send_![object, release];
+            }
         }
         for buffer in &mut self.buffers {
             buffer.next_value = 0;
