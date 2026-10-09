@@ -251,6 +251,18 @@ struct AttachmentFormats {
 }
 
 impl AttachmentFormats {
+    /// The formats of the view's own render passes.
+    unsafe fn of_view(view: ObjcId) -> Self {
+        // `Invalid` when the view has no depth/stencil buffer.
+        let depth_stencil_format: MTLPixelFormat = msg_send![view, depthStencilPixelFormat];
+        AttachmentFormats {
+            color: msg_send![view, colorPixelFormat],
+            depth: depth_stencil_format,
+            stencil: depth_stencil_format,
+            sample_count: msg_send![view, sampleCount],
+        }
+    }
+
     unsafe fn of_pass(render_pass_desc: ObjcId) -> Self {
         let format_of = |attachment: ObjcId| {
             let texture: ObjcId = msg_send![attachment, texture];
@@ -276,9 +288,11 @@ impl AttachmentFormats {
 
 #[derive(Clone, Debug)]
 struct PipelineInternal {
-    /// Everything but the attachment formats, which each render pass
-    /// the pipeline draws in fills in for its own pipeline state.
+    /// Everything but the attachment formats, which each pipeline state
+    /// fills in with its own.
     descriptor: ObjcId,
+    /// The view's, built with the pipeline, then one for each other set
+    /// of formats a render pass has applied it with.
     pipeline_states: Vec<(AttachmentFormats, ObjcId)>,
     depth_stencil_state: ObjcId,
     //layout: Vec<BufferLayout>,
@@ -288,8 +302,8 @@ struct PipelineInternal {
 }
 
 impl PipelineInternal {
-    /// Built on first use, since a pipeline doesn't know which render
-    /// passes it will draw in.
+    /// The pipeline state for `formats`, built the first time they're
+    /// asked for.
     fn pipeline_state(&mut self, device: ObjcId, formats: AttachmentFormats) -> ObjcId {
         if let Some(&(_, pipeline_state)) = self
             .pipeline_states
@@ -1283,7 +1297,7 @@ impl RenderingBackend for MetalContext {
                 newDepthStencilStateWithDescriptor: depth_stencil_desc
             ];
 
-            let pipeline = PipelineInternal {
+            let mut pipeline = PipelineInternal {
                 descriptor,
                 pipeline_states: vec![],
                 depth_stencil_state,
@@ -1292,6 +1306,10 @@ impl RenderingBackend for MetalContext {
                 _shader: shader,
                 //params,
             };
+            // Compiling a pipeline state takes milliseconds, so the view's
+            // is built now rather than mid-frame. A render target's formats
+            // aren't known until a pass draws into it.
+            pipeline.pipeline_state(self.device, AttachmentFormats::of_view(self.view));
 
             self.pipelines.push(pipeline);
 
