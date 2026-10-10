@@ -406,8 +406,11 @@ pub struct TextureParams {
     /// resolves into outlives the pass.
     ///
     /// On Metal, a GPU with tile memory keeps them there alone, so the
-    /// texture takes up no memory, and no pass stores them. OpenGL keeps them
-    /// as it does any texture's.
+    /// texture takes up no memory, and no pass stores them. On OpenGL ES with
+    /// [`Features::multisampled_render_to_texture`], a pass resolving a
+    /// multisampled one keeps its samples in tile memory, and a pass that
+    /// doesn't clear one doesn't load it. Elsewhere, OpenGL keeps them as it
+    /// does any texture's.
     pub transient: bool,
 }
 
@@ -592,6 +595,13 @@ pub struct Features {
     /// With resolve_attachments: false, not-none resolve_img in new_render_pass will
     /// result in a runtime panic.
     pub resolve_attachments: bool,
+    /// Whether the context is OpenGL ES 3 with
+    /// `GL_EXT_multisampled_render_to_texture`. A pass that resolves a
+    /// [transient](TextureParams::transient) multisampled color texture
+    /// then draws into its resolve texture, keeping the samples in tile
+    /// memory and resolving them as the GPU writes the tile out, rather
+    /// than copying them at every `end_render_pass`. Always false on Metal.
+    pub multisampled_render_to_texture: bool,
 }
 
 impl Default for Features {
@@ -599,6 +609,7 @@ impl Default for Features {
         Features {
             instancing: true,
             resolve_attachments: true,
+            multisampled_render_to_texture: false,
         }
     }
 }
