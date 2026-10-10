@@ -178,7 +178,12 @@ macro_rules! __log_line {
     };
 }
 
-#[cfg(not(any(target_arch = "wasm32", target_os = "android", target_os = "ios")))]
+#[cfg(not(any(
+    target_arch = "wasm32",
+    target_os = "android",
+    target_os = "ios",
+    target_os = "tvos"
+)))]
 pub fn __private_api_log_lit(
     message: &str,
     _level: Level,
@@ -232,7 +237,7 @@ fn c_string(message: &str) -> std::ffi::CString {
     std::ffi::CString::new(message.replace('\0', "\u{FFFD}")).unwrap()
 }
 
-#[cfg(target_os = "ios")]
+#[cfg(any(target_os = "ios", target_os = "tvos"))]
 pub fn __private_api_log_lit(
     message: &str,
     _level: Level,
