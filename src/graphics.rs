@@ -1052,6 +1052,11 @@ impl<'a> UniformsSource<'a> {
 pub enum ShaderSource<'a> {
     Glsl { vertex: &'a str, fragment: &'a str },
     Msl { program: &'a str },
+    /// A Metal library compiled ahead of time, as `xcrun metal` writes
+    /// one, holding `vertexShader` and `fragmentShader`. Loading one skips
+    /// compiling MSL at runtime, which can take tens of milliseconds per
+    /// shader on a device that hasn't cached it yet.
+    MetalLibrary { data: &'a [u8] },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Hash, Eq)]
@@ -1109,7 +1114,8 @@ impl ContextInfo {
 
 pub trait RenderingBackend {
     fn info(&self) -> ContextInfo;
-    /// For metal context's ShaderSource should contain MSL source string, for GL - glsl.
+    /// For metal context's ShaderSource should contain MSL source string or a compiled
+    /// Metal library, for GL - glsl.
     ///
     /// If in doubt, _most_ OpenGL contexts support "#version 100" glsl shaders.
     /// So far miniquad never encountered where it can create a rendering context,
