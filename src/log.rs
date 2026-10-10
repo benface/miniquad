@@ -68,18 +68,6 @@ impl Ord for Level {
 
 #[macro_export(local_inner_macros)]
 macro_rules! log {
-    (target: $target:expr, $lvl:expr, $message:expr) => ({
-        let lvl = $lvl;
-        //if lvl <= $crate::STATIC_MAX_LEVEL && lvl <= $crate::max_level() {
-            // ensure that $message is a valid format string literal
-            let _ = __log_format_args!($message);
-            $crate::log::__private_api_log_lit(
-                $message,
-                lvl,
-                &($target, __log_module_path!(), __log_file!(), __log_line!()),
-            );
-        //}
-    });
     (target: $target:expr, $lvl:expr, $($arg:tt)+) => ({
         let lvl = $lvl;
         //if lvl <= $crate::STATIC_MAX_LEVEL && lvl <= $crate::max_level() {
@@ -239,18 +227,25 @@ pub fn __private_api_log_lit(
 
 #[test]
 fn test_logs() {
+    let value = 1;
+
     trace!("info");
     trace!("info: {}", 1);
+    trace!("info: {value}");
 
     debug!("info");
     debug!("info: {}", 1);
+    debug!("info: {value}");
 
     info!("info");
     info!("info: {}", 1);
+    info!("info: {value}");
 
     warn!("info");
     warn!("info: {}", 1);
+    warn!("info: {value}");
 
     error!("info");
     error!("info: {}", 1);
+    error!("info: {value}");
 }
