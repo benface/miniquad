@@ -773,9 +773,15 @@ impl RenderingBackend for MetalContext {
                         nil,
                         DISPATCH_DATA_DESTRUCTOR_DEFAULT,
                     );
-                    let library =
+                    let library: ObjcId =
                         msg_send![self.device, newLibraryWithData: data error: &mut error];
                     dispatch_release(data);
+                    if library.is_null() {
+                        let description: ObjcId = msg_send![error, localizedDescription];
+                        return Err(ShaderError::LinkError(apple_util::nsstring_to_string(
+                            description,
+                        )));
+                    }
                     library
                 }
                 _ => panic!("OpenGl source on Metal context"),
