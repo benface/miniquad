@@ -549,6 +549,7 @@ impl RenderingBackend for MetalContext {
             features: Features {
                 instancing: true,
                 resolve_attachments: false,
+                multisampled_render_to_texture: false,
             },
         }
     }
