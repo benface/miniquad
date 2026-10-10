@@ -7,6 +7,9 @@ use crate::native::apple::{
 
 use super::*;
 
+use std::ffi::c_void;
+use std::sync::{Arc, Condvar, Mutex};
+
 // https://developer.apple.com/metal/Metal-Feature-Set-Tables.pdf
 const MAX_UNIFORM_BUFFER_SIZE: u64 = 4 * 1024 * 1024;
 const NUM_INFLIGHT_FRAMES: usize = 3;
@@ -286,14 +289,97 @@ impl AttachmentFormats {
     }
 }
 
-#[derive(Clone, Debug)]
+/// A pipeline state for one set of attachment formats.
+#[derive(Debug)]
+enum PipelineState {
+    /// Being built by Metal, on threads of its own.
+    Building(Arc<BuildingPipelineState>),
+    Built(ObjcId),
+}
+
+/// Where Metal's completion handler leaves the pipeline state it built,
+/// or why it couldn't.
+#[derive(Debug, Default)]
+struct BuildingPipelineState {
+    result: Mutex<Option<BuildResult>>,
+    finished: Condvar,
+}
+
+#[derive(Debug)]
+struct BuildResult(Result<ObjcId, String>);
+
+// SAFETY: a built pipeline state is immutable, and Metal objects are
+// reference counted atomically.
+unsafe impl Send for BuildResult {}
+
+impl BuildingPipelineState {
+    fn wait(&self) -> Result<ObjcId, String> {
+        let mut result = self.result.lock().unwrap();
+        loop {
+            if let Some(BuildResult(built)) = result.take() {
+                return built;
+            }
+            result = self.finished.wait(result).unwrap();
+        }
+    }
+}
+
+/// The block Metal calls once a pipeline state is built, laid out as
+/// the blocks runtime expects. It needs no copy or dispose helpers, as
+/// what it holds it releases when called, which Metal does once.
+#[repr(C)]
+struct CompletionBlock {
+    isa: *const c_void,
+    flags: i32,
+    reserved: i32,
+    invoke: unsafe extern "C" fn(*mut CompletionBlock, ObjcId, ObjcId),
+    descriptor: *const CompletionBlockDescriptor,
+    /// The descriptor the state is built from, which the build may read
+    /// until it's done.
+    pipeline_descriptor: ObjcId,
+    /// Where the state goes, from `Arc::into_raw`.
+    building: *const BuildingPipelineState,
+}
+
+#[repr(C)]
+struct CompletionBlockDescriptor {
+    reserved: u64,
+    size: u64,
+}
+
+static COMPLETION_BLOCK_DESCRIPTOR: CompletionBlockDescriptor = CompletionBlockDescriptor {
+    reserved: 0,
+    size: std::mem::size_of::<CompletionBlock>() as u64,
+};
+
+unsafe extern "C" fn pipeline_state_built(
+    block: *mut CompletionBlock,
+    pipeline_state: ObjcId,
+    error: ObjcId,
+) {
+    let block = &*block;
+    msg_send_![block.pipeline_descriptor, release];
+    let building = Arc::from_raw(block.building);
+    let result = if pipeline_state.is_null() {
+        let description: ObjcId = msg_send![error, localizedDescription];
+        Err(apple_util::nsstring_to_string(description))
+    } else {
+        // Metal only lends it to the handler.
+        msg_send_![pipeline_state, retain];
+        Ok(pipeline_state)
+    };
+    *building.result.lock().unwrap() = Some(BuildResult(result));
+    building.finished.notify_all();
+}
+
+#[derive(Debug)]
 struct PipelineInternal {
     /// Everything but the attachment formats, which each pipeline state
     /// fills in with its own.
     descriptor: ObjcId,
-    /// The view's, built with the pipeline, then one for each other set
-    /// of formats a render pass has applied it with.
-    pipeline_states: Vec<(AttachmentFormats, ObjcId)>,
+    /// The view's, started with the pipeline, then one for each other
+    /// set of formats it's been prepared for or drawn with.
+    pipeline_states: Vec<(AttachmentFormats, PipelineState)>,
     depth_stencil_state: ObjcId,
     //layout: Vec<BufferLayout>,
     //attributes: Vec<VertexAttributeInternal>,
@@ -302,40 +388,68 @@ struct PipelineInternal {
 }
 
 impl PipelineInternal {
-    /// The pipeline state for `formats`, built the first time they're
-    /// asked for.
-    fn pipeline_state(&mut self, device: ObjcId, formats: AttachmentFormats) -> ObjcId {
-        if let Some(&(_, pipeline_state)) = self
+    /// Starts building the pipeline state for `formats`, unless it's
+    /// built or being built already. Metal builds it on threads of its
+    /// own, so states started together build at once.
+    fn start_building(&mut self, device: ObjcId, formats: AttachmentFormats) {
+        if self
             .pipeline_states
             .iter()
-            .find(|(built_for, _)| *built_for == formats)
+            .any(|(built_for, _)| *built_for == formats)
         {
-            return pipeline_state;
+            return;
         }
+        let building = Arc::new(BuildingPipelineState::default());
         unsafe {
+            // A copy, so the next build's formats don't change this one's.
+            let descriptor = msg_send_![self.descriptor, copy];
             let color_attachment = msg_send_![
-                msg_send_![self.descriptor, colorAttachments],
+                msg_send_![descriptor, colorAttachments],
                 objectAtIndexedSubscript: 0usize
             ];
             msg_send_![color_attachment, setPixelFormat: formats.color];
-            msg_send_![self.descriptor, setDepthAttachmentPixelFormat: formats.depth];
-            msg_send_![self.descriptor, setStencilAttachmentPixelFormat: formats.stencil];
-            msg_send_![self.descriptor, setSampleCount: formats.sample_count];
+            msg_send_![descriptor, setDepthAttachmentPixelFormat: formats.depth];
+            msg_send_![descriptor, setStencilAttachmentPixelFormat: formats.stencil];
+            msg_send_![descriptor, setSampleCount: formats.sample_count];
 
-            let mut error: ObjcId = nil;
-            let pipeline_state: ObjcId = msg_send![
+            let block = CompletionBlock {
+                isa: _NSConcreteStackBlock.as_ptr() as *const c_void,
+                flags: 0,
+                reserved: 0,
+                invoke: pipeline_state_built,
+                descriptor: &COMPLETION_BLOCK_DESCRIPTOR,
+                pipeline_descriptor: descriptor,
+                building: Arc::into_raw(building.clone()),
+            };
+            msg_send_![
                 device,
-                newRenderPipelineStateWithDescriptor: self.descriptor
-                error: &mut error
+                newRenderPipelineStateWithDescriptor: descriptor
+                completionHandler: &block
             ];
-            if pipeline_state.is_null() {
-                let description: ObjcId = msg_send![error, localizedDescription];
-                let string = apple_util::nsstring_to_string(description);
-                panic!("newRenderPipelineStateWithDescriptor error: {}", string);
-            }
-            self.pipeline_states.push((formats, pipeline_state));
-            pipeline_state
         }
+        self.pipeline_states
+            .push((formats, PipelineState::Building(building)));
+    }
+
+    /// The pipeline state for `formats`, waiting for it to finish
+    /// building, or building it now if it hasn't started.
+    fn pipeline_state(&mut self, device: ObjcId, formats: AttachmentFormats) -> ObjcId {
+        self.start_building(device, formats);
+        let (_, state) = self
+            .pipeline_states
+            .iter_mut()
+            .find(|(built_for, _)| *built_for == formats)
+            .unwrap();
+        if let PipelineState::Building(building) = state {
+            let built = building.wait().unwrap_or_else(|error| {
+                panic!("newRenderPipelineStateWithDescriptor error: {}", error)
+            });
+            *state = PipelineState::Built(built);
+        }
+        let PipelineState::Built(pipeline_state) = state else {
+            unreachable!()
+        };
+        *pipeline_state
     }
 }
 
@@ -1231,15 +1345,25 @@ impl RenderingBackend for MetalContext {
                 _shader: shader,
                 //params,
             };
-            // Compiling a pipeline state takes milliseconds, so the view's
-            // is built now rather than mid-frame. A render target's formats
-            // aren't known until a pass draws into it.
-            pipeline.pipeline_state(self.device, AttachmentFormats::of_view(self.view));
+            // Building a pipeline state takes milliseconds, so the view's
+            // starts now rather than at the first draw. A render target's
+            // formats aren't known until it's prepared for or drawn into.
+            pipeline.start_building(self.device, AttachmentFormats::of_view(self.view));
 
             self.pipelines.push(pipeline);
 
             Pipeline(self.pipelines.len() - 1)
         }
+    }
+
+    fn prepare_pipeline(&mut self, pipeline: &Pipeline, pass: Option<RenderPass>) {
+        let formats = unsafe {
+            match pass {
+                None => AttachmentFormats::of_view(self.view),
+                Some(pass) => AttachmentFormats::of_pass(self.passes[pass.0].render_pass_desc),
+            }
+        };
+        self.pipelines[pipeline.0].start_building(self.device, formats);
     }
 
     fn apply_pipeline(&mut self, pipeline: &Pipeline) {
