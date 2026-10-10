@@ -1055,7 +1055,9 @@ pub enum ShaderSource<'a> {
     /// A Metal library compiled ahead of time, as `xcrun metal` writes
     /// one, holding `vertexShader` and `fragmentShader`. Loading one skips
     /// compiling MSL at runtime, which can take tens of milliseconds per
-    /// shader on a device that hasn't cached it yet.
+    /// shader on a device that hasn't cached it yet. If Metal can't load
+    /// it, `new_shader` returns a `ShaderError::LinkError`, so the app
+    /// can compile the MSL instead.
     MetalLibrary { data: &'a [u8] },
 }
 
