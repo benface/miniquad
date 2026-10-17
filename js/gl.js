@@ -1010,6 +1010,9 @@ var importObject = {
             stringToUTF8(parameter, array, 0, len);
             return msg;
         },
+        webgl_enable_extension: function (name, length) {
+            return gl.getExtension(UTF8ToString(name, length)) !== null;
+        },
         glCompileShader: function (shader, count, string, length) {
             GL.validateGLObjectID(GL.shaders, shader, 'glCompileShader', 'shader');
             gl.compileShader(GL.shaders[shader]);
