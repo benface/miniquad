@@ -29,6 +29,9 @@ pub struct MacosDisplay {
     gl_context: ObjcId,
     fullscreen: bool,
     occluded: bool,
+    /// Whether frames keep to the display's refresh rate, as they do
+    /// unless `swap_interval` is `Some(0)`.
+    vsync: bool,
     // [NSCursor hide]/unhide calls should be balanced
     // hide/hide/unhide will keep cursor hidden
     // so need to keep internal cursor state to avoid problems from
@@ -1008,7 +1011,11 @@ fn get_window_payload(this: &Object) -> &mut MacosDisplay {
     }
 }
 
-unsafe fn create_metal_view(_: &mut MacosDisplay, sample_count: i32, high_dpi: bool) -> ObjcId {
+unsafe fn create_metal_view(
+    display: &mut MacosDisplay,
+    sample_count: i32,
+    high_dpi: bool,
+) -> ObjcId {
     let mtl_device_obj = MTLCreateSystemDefaultDevice();
     let view_class = define_metal_view_class();
     let view: ObjcId = msg_send![view_class, alloc];
@@ -1025,6 +1032,10 @@ unsafe fn create_metal_view(_: &mut MacosDisplay, sample_count: i32, high_dpi: b
     // Without high DPI, `update_dimensions` sizes the drawable in points
     // rather than for the screen's backing scale.
     let () = msg_send![view, setAutoResizeDrawable: high_dpi];
+    if !display.vsync {
+        let layer: ObjcId = msg_send![view, layer];
+        let () = msg_send![layer, setDisplaySyncEnabled: NO];
+    }
 
     view
 }
@@ -1299,7 +1310,7 @@ unsafe fn perform_redraw(
     }
     unsafe {
         // reduce CPU usage hen window is in background
-        if display.occluded {
+        if display.vsync && display.occluded {
             let now = Instant::now();
             let framerate = 60.0;
             let period = (1.0 / framerate * 1000.) as u64;
@@ -1345,6 +1356,7 @@ where
         gl_context: std::ptr::null_mut(),
         fullscreen: false,
         occluded: false,
+        vsync: conf.platform.swap_interval != Some(0),
         cursor_shown: true,
         current_cursor: CursorIcon::Default,
         cursor_grabbed: false,
@@ -1487,7 +1499,7 @@ where
     // Basically reimplementing msg_send![ns_app, run] here
     let distant_future: ObjcId = msg_send![class!(NSDate), distantFuture];
     let distant_past: ObjcId = msg_send![class!(NSDate), distantPast];
-    let frame_pacer = if conf.platform.blocking_event_loop {
+    let frame_pacer = if conf.platform.blocking_event_loop || !display.vsync {
         None
     } else {
         FramePacer::new()
