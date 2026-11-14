@@ -1269,7 +1269,10 @@ var importObject = {
                 }
 
                 keys_down.add(sapp_key_code);
-                wasm_exports.key_down(sapp_key_code, into_sapp_modifiers(event), event.repeat);
+                // `key` is one character, or a name like "Shift" or "Dead".
+                var characters = Array.from(event.key);
+                var character = characters.length == 1 ? characters[0].codePointAt(0) : 0;
+                wasm_exports.key_down(sapp_key_code, into_sapp_modifiers(event), event.repeat, character);
                 // for "space", "quote", and "slash" preventDefault will prevent
                 // key_press event, so send it here instead
                 if (sapp_key_code == 32 || sapp_key_code == 39 || sapp_key_code == 47) {
