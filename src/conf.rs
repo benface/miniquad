@@ -191,6 +191,12 @@ pub struct Platform {
     /// becoming key. Meant for windows nobody interacts with, such as one a tool only
     /// screenshots.
     pub macos_launch_in_background: bool,
+
+    /// If `true`, on macOS the app runs with no window, Dock icon or menu bar, and
+    /// never registers as a running app: only its view draws, sized as the window
+    /// would be, frame after frame until it quits. Metal only. Meant for tools that
+    /// draw into render targets and read them back.
+    pub macos_headless: bool,
 }
 
 impl Default for Platform {
@@ -208,6 +214,7 @@ impl Default for Platform {
             linux_wm_class: "miniquad-application",
             android_panic_hook: true,
             macos_launch_in_background: false,
+            macos_headless: false,
         }
     }
 }
